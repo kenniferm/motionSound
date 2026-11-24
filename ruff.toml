@@ -1,0 +1,6 @@
+target-version = "py311"
+include = ["soundlab/**/*.py", "tests/**/*.py", "browser_tests/**/*.py", "scripts/**/*.py"]
+
+[lint]
+# Sonoraと同じく、整形の変更ではなくコードの誤りと未使用の定義を検査する。
+select = ["F"]
