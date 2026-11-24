@@ -1,0 +1,26 @@
+[project]
+name = "motion-sound"
+version = "0.1.0"
+description = "Local AI sound creation studio"
+requires-python = ">=3.11"
+dependencies = [
+    "starlette>=1.10,<2",
+    "uvicorn>=0.54,<1",
+    "numpy>=1.26,<3",
+    "scipy>=1.15,<2",
+    "httpx>=0.28,<1",
+    "openai>=1.84,<3",
+    "pydantic>=2.7,<3",
+    "sofar==1.2.3",
+    "netcdf4==1.7.2",
+]
+[dependency-groups]
+dev = [
+    "pytest>=8,<10",
+    "playwright>=1.50,<2",
+    "pyfar==0.7.4",
+    "ruff==0.14.6",
+]
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

@@ -1,0 +1,119 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop, 'work/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secrets:
+    name: Secret scan (Gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: python3 scripts/check_secrets.py
+
+  javascript:
+    name: Frontend build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Use pinned npm
+        run: |
+          npm install --prefix "$RUNNER_TEMP/motionsound-npm" --no-save --package-lock=false --ignore-scripts npm@12.2.2
+          echo "$RUNNER_TEMP/motionsound-npm/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: npm ci --prefix frontend --no-audit --no-fund
+      - run: npm run --prefix frontend build
+      - run: node --test tests/test_spatial_field.js
+
+  python-lint:
+    name: Python lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.9.0'
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --locked --dev
+      - run: .venv/bin/python -m ruff check .
+
+  tests:
+    name: Tests (macOS)
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      OPENAI_API_KEY: ''
+      OPENAI_MODEL: ''
+      ANTHROPIC_API_KEY: ''
+      ANTHROPIC_MODEL: ''
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: '0.9.0'
+          enable-cache: true
+      - run: uv python install
+      - run: uv sync --locked --dev
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Use pinned npm
+        run: |
+          npm install --prefix "$RUNNER_TEMP/motionsound-npm" --no-save --package-lock=false --ignore-scripts npm@12.2.2
+          echo "$RUNNER_TEMP/motionsound-npm/node_modules/.bin" >> "$GITHUB_PATH"
+      - run: npm ci --prefix frontend --no-audit --no-fund
+      - run: npm run --prefix frontend build
+      - name: Install FFmpeg
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            brew install ffmpeg
+          fi
+          ffmpeg -version
+      - name: Import verified FABIAN dataset
+        run: |
+          curl --fail --location --retry 3 --connect-timeout 30 --max-time 300 \
+            https://sofacoustics.org/data/database/tu-berlin/FABIAN_HRIR_measured_HATO_0.sofa \
+            --output "$RUNNER_TEMP/FABIAN_HRIR_measured_HATO_0.sofa"
+          .venv/bin/python -m soundlab.spatial import-dataset "$RUNNER_TEMP/FABIAN_HRIR_measured_HATO_0.sofa"
+      - name: Audio and API regressions (mock APIs)
+        run: .venv/bin/python -m pytest -q
+      - name: Install Chromium for browser regressions
+        run: .venv/bin/python -m playwright install chromium
+      - name: Browser regressions (isolated workspace, mock APIs, muted audio)
+        env:
+          SOUNDLAB_BROWSER_EVIDENCE_DIR: ${{ runner.temp }}/browser-evidence
+        run: .venv/bin/python -m pytest browser_tests -q
+      - name: Keep browser evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: browser-evidence
+          path: ${{ runner.temp }}/browser-evidence
+          retention-days: 7
+          if-no-files-found: ignore

@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+cd "$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+
+url=http://127.0.0.1:8501
+if [ "$#" -eq 0 ] && command -v curl >/dev/null 2>&1 &&
+    health=$(curl -q --noproxy '*' --connect-timeout 1 --max-time 2 -s "$url/api/health"); then
+    if [ "$health" = '{"status":"ok","app":"motionSound"}' ]; then
+        printf '%s\n' "motionSoundはすでに起動しています。$url を開いてください。"
+        exit 0
+    fi
+    printf '%s\n' "8501番ポートには別のHTTPサービスが応答しています。停止してから ./start を実行してください。" >&2
+    exit 1
+fi
+
+if ! command -v uv >/dev/null 2>&1; then
+    printf '%s\n' 'uvが見つかりません。uvをインストールしてから再実行してください。' >&2
+    exit 1
+fi
+
+if ! command -v npm >/dev/null 2>&1; then
+    printf '%s\n' 'Node.jsとnpmをインストールしてから再実行してください。' >&2
+    exit 1
+fi
+
+npm ci --prefix frontend --include=dev --no-audit --no-fund
+npm run --prefix frontend build
+
+if [ -f .env.local ]; then
+    exec uv run --locked --env-file .env.local uvicorn soundlab.api:create_app --factory --host 127.0.0.1 --port 8501 "$@" --workers 1
+fi
+exec uv run --locked uvicorn soundlab.api:create_app --factory --host 127.0.0.1 --port 8501 "$@" --workers 1
